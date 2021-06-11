@@ -23,15 +23,149 @@
 #define ABAJO 0xA2
 #define ARRIBA 0xA3
 #define LANZAMIENTO 0xD1
-#define NOCONOCIDO 0xXX
+
+void Respuesta();
+void LeerBotones();
 
 uint8_t txbuff, checksum, i, header1 = 0xE0, header2 = 0x0E, estado, rxBuff[16], txBuff[9], indexWrite, indexRead;
 uint8_t stateRead, respuesta, botones, botonesAnterior;
-uint16_t lenght = 0x0003, lenghtPL;
-unsigned long Tiempo, UTDebounce, UTRebote;
+uint16_t lenghtPL;
+unsigned long tiempo, uTDebounce, uTRebote, uTBtn, uTDato;
 
-void Respuesta();
-void leerBotones();
+void LeerBotones(){
+  if (digitalRead(SW1) || digitalRead(SW2) || digitalRead(SW3) || digitalRead(SW4)){
+    botones = 0x00;
+    if( digitalRead(SW1))
+      botones |= 0x01;
+    if( digitalRead(SW2))
+      botones |= 0x02;
+    if( digitalRead(SW3))
+      botones |= 0x04;
+    if( digitalRead(SW4))
+      botones |= 0x08;
+    tiempo = millis();
+    if( (tiempo - uTDebounce) >= 30){
+      if (botones ^ botonesAnterior){
+        botonesAnterior = botones;
+        if (botonesAnterior & 0x01 ){
+          txBuff[2] = 0x02;
+          txBuff[5] = 0xD2;
+          txBuff[6] = 0xFC;
+        }
+        if (botonesAnterior & 0x02 ){
+          txBuff[2] = 0x04;
+          txBuff[5] = 0xD0;
+          txBuff[6] = 0x01;
+          txBuff[7] = 0x00;
+          txBuff[8] = 0xFD;
+          uTBtn = millis();
+        }
+        if (botonesAnterior & 0x04 ){
+          txBuff[2] = 0x04;
+          txBuff[5] = 0xD0;
+          txBuff[6] = 0xFF;
+          txBuff[7] = 0xFF;
+          txBuff[8] = 0xFA;
+          uTBtn = millis();
+        }
+        if (botonesAnterior & 0x08 ){
+          txBuff[2] = 0x02;
+          txBuff[5] = 0xD1;
+          txBuff[6] = 0xFB;
+          txBuff[7] = 0x00;
+          txBuff[8] = 0x00;
+        }
+        indexWrite = 0x00;
+        while ((indexWrite < 9) && Serial.availableForWrite()){
+          Serial.write(txBuff[indexWrite]);
+          indexWrite++;
+        }
+        } else {
+          uTDebounce = millis();
+          if (((botonesAnterior & 0x02) || (botonesAnterior && 0x04)) && ((uTDebounce - uTBtn) > 500)){
+            txBuff[2] = 0x04;
+            txBuff[5] = 0xD0;
+            if (botonesAnterior & 0x02){
+              txBuff[6] = 0x0A;
+              txBuff[7] = 0x00;
+              txBuff[8] = 0x06;
+            }
+            if (botonesAnterior & 0x04){
+              txBuff[6] = 0xF6;
+              txBuff[7] = 0xFF;
+              txBuff[8] = 0xF1;
+            }
+            indexWrite = 0;
+            while((indexWrite < 9) && Serial.availableForWrite()){
+              Serial.write(txBuff[indexWrite]);
+              indexWrite++;
+            }
+          }
+        }
+      }
+    } else {
+      uTDebounce = millis();
+      botonesAnterior = 0x00;
+    }
+}
+
+void Respuesta(){
+  switch (rxBuff[0]){
+    case ALIVE:
+    txBuff[2] = 0x03;
+    txBuff[5] = 0xF0;
+    txBuff[6] = 0x0D;
+    txBuff[7] = 0x28;
+    txBuff[8] = 0x00;
+    respuesta = 0x01;
+    break;
+    case LANZAMIENTO:
+    if (rxBuff[1] == 0x00){
+      digitalWrite(LED_BUILTIN,LOW);
+      estado = 0x00;
+      respuesta = 0x00;
+    }
+    if (rxBuff[1] == 0x01){
+      digitalWrite(LED_BUILTIN,HIGH);
+    }
+    break;
+    case DERECHA:
+    estado = 0x01;
+    respuesta = 0x00;
+    uTRebote = millis();
+    break;
+    case IZQUIERDA:
+    estado = 0x02;
+    respuesta = 0x00;
+    uTRebote = millis();
+    break;
+    case ABAJO:
+    estado = 0x04;
+    respuesta = 0x00;
+    uTRebote = millis();
+    break;
+    case ARRIBA:
+    estado = 0x08;
+    respuesta = 0x00;
+    uTRebote = millis();
+    break;
+    default:
+    respuesta = 0x00;
+  }
+  if (respuesta == 0x00){
+    digitalWrite(LED1,estado & 0x01);
+    digitalWrite(LED2,estado & 0x02);
+    digitalWrite(LED3,estado & 0x04);
+    digitalWrite(LED4,estado & 0x08);
+    } else {
+    indexWrite = 0x00;
+    while ((indexWrite < 9) && Serial.availableForWrite() ){
+      Serial.write(txBuff[indexWrite]);
+      indexWrite++;
+    }
+  }
+}
+
 
 void setup() {
 
@@ -56,9 +190,10 @@ void setup() {
 }
 
 void loop() {
-  leerBotones();
+  LeerBotones();
   if (Serial.available()){
     rxBuff[indexRead] = Serial.read();
+    uTDato = millis();
     switch(stateRead){
       case ESPERANDOE0:
       if( rxBuff[indexRead] == 0xE0 ){
@@ -107,135 +242,14 @@ void loop() {
       stateRead = ESPERANDOE0;
     }
   }
-  Tiempo = millis();
-  if (Tiempo - UTRebote >= 800){
+  tiempo = millis();
+  if (tiempo - uTRebote >= 800){
     digitalWrite(LED1,LOW);
     digitalWrite(LED2,LOW);
     digitalWrite(LED3,LOW);
     digitalWrite(LED4,LOW);
   }
-}
-
-void Respuesta(){
-  switch (rxBuff[0]){
-    case ALIVE:
-    txBuff[2] = 0x03;
-    txBuff[5] = 0xF0;
-    txBuff[6] = 0x0D;
-    txBuff[7] = 0x28;
-    txBuff[8] = 0x00;
-    respuesta = 0x01;
-    break;
-    case LANZAMIENTO:
-    if (rxBuff[1] == 0x00){
-      digitalWrite(LED_BUILTIN,LOW);
-      estado = 0x00;
-      respuesta = 0x00;
-    }
-    if (rxBuff[1] == 0x01){
-      digitalWrite(LED_BUILTIN,HIGH);
-    }
-    break;
-    case DERECHA:
-    estado = 0x01;
-    respuesta = 0x00;
-    UTRebote = millis();
-    break;
-    case IZQUIERDA:
-    estado = 0x02;
-    respuesta = 0x00;
-    UTRebote = millis();
-    break;
-    case ABAJO:
-    estado = 0x04;
-    respuesta = 0x00;
-    UTRebote = millis();
-    break;
-    case ARRIBA:
-    estado = 0x08;
-    respuesta = 0x00;
-    UTRebote = millis();
-    break;
-    default:
-    respuesta = 0x00;
+  if (tiempo - uTDato > 15){
+    stateRead =  ESPERANDOE0;
   }
-  if (respuesta == 0x00){
-    digitalWrite(LED1,estado & 0x01);
-    digitalWrite(LED2,estado & 0x02);
-    digitalWrite(LED3,estado & 0x04);
-    digitalWrite(LED4,estado & 0x08);
-    } else {
-    indexWrite = 0x00;
-    while( Serial.availableForWrite() ){
-      Serial.write(txBuff[indexWrite]);
-      indexWrite++;
-    }
-  }
-}
-void leerBotones(){
-  if (digitalRead(SW1) || digitalRead(SW2) || digitalRead(SW3) || digitalRead(SW4)){
-    botones = 0x00;
-    if( digitalRead(SW1))
-      botones |= 0x01;
-    if( digitalRead(SW2))
-      botones |= 0x02;
-    if( digitalRead(SW3))
-      botones |= 0x04;
-    if( digitalRead(SW4))
-      botones |= 0x08;
-    Tiempo = millis();
-    if( (Tiempo - UTDebounce) >= 30){
-      if (botones ^ botonesAnterior){
-        botonesAnterior = botones;
-        if (botonesAnterior & 0x01 ){
-          txBuff[2] = 0x02;
-          txBuff[5] = 0xD2;
-          txBuff[6] = 0xFC;
-        }
-        if (botonesAnterior & 0x02 ){
-          txBuff[2] = 0x04;
-          txBuff[5] = 0xD0;
-          txBuff[6] = 0x01;
-          txBuff[7] = 0x00;
-          txBuff[8] = 0xFD;
-        }
-        if (botonesAnterior & 0x04 ){
-          txBuff[2] = 0x04;
-          txBuff[5] = 0xD0;
-          txBuff[6] = 0xFF;
-          txBuff[7] = 0xFF;
-          txBuff[8] = 0xFA;
-        }
-        if (botonesAnterior & 0x08 ){
-          txBuff[2] = 0x02;
-          txBuff[5] = 0xD1;
-          txBuff[6] = 0xFB;
-          txBuff[7] = 0x00;
-          txBuff[8] = 0x00;
-        }
-      /*  if (Serial.availableForWrite()){
-          Serial.write(txBuff[0]);
-          Serial.write(txBuff[1]);
-          Serial.write(txBuff[2]);
-          Serial.write(txBuff[3]);
-          Serial.write(txBuff[4]);
-          Serial.write(txBuff[5]);
-          Serial.write(txBuff[6]);
-          Serial.write(txBuff[7]);
-          Serial.write(txBuff[8]);
-        }*/
-        indexWrite = 0x00;
-        while (Serial.availableForWrite()){
-          Serial.write(txBuff[indexWrite]);
-          indexWrite++;
-        }
-        UTDebounce = 0;
-        } else {
-          UTDebounce = millis();
-        }
-      }
-    } else {
-      botonesAnterior = 0x00;
-      UTDebounce = millis();
-    }
 }

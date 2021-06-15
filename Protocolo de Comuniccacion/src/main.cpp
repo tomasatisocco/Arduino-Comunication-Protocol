@@ -26,8 +26,9 @@
 
 void Respuesta();
 void LeerBotones();
+void PutByteIntx(uint8_t byte);
 
-uint8_t txbuff, checksum, i, header1 = 0xE0, header2 = 0x0E, estado, rxBuff[16], txBuff[9], indexWrite, indexRead;
+uint8_t txbuff, checksum, i, header1 = 0xE0, header2 = 0x0E, estado, rxBuff[32], txBuff[32], indexWrite, indexRead;
 uint8_t stateRead, respuesta, botones, botonesAnterior;
 uint16_t lenghtPL;
 unsigned long tiempo, uTDebounce, uTRebote, uTBtn, uTDato;
@@ -109,12 +110,18 @@ void LeerBotones(){
     }
 }
 
+void PutByteIntx(uint8_t byte){
+  txBuff[indexWrite++] = byte;
+  indexWrite &= (32 - 1);
+}
+
 void Respuesta(){
   switch (rxBuff[0]){
     case ALIVE:
-    txBuff[2] = 0x03;
-    txBuff[5] = 0xF0;
-    txBuff[6] = 0x0D;
+    txBuff[indexWrite++] = 0x03;
+    PutByteIntx(0x03);
+    PutByteIntx(0x0F);
+    txBuff[indexWrite++] = 0x0D;
     txBuff[7] = 0x28;
     txBuff[8] = 0x00;
     respuesta = 0x01;
@@ -218,10 +225,10 @@ void loop() {
       checksum = checksum + rxBuff[indexRead];
       break;
       case ESPERANDO3A:
-      if (rxBuff[indexRead] == 0x3A){
-        checksum = checksum + 0x3A;
-        stateRead = ESPERANDOPL;
-      }
+        if (rxBuff[indexRead] == 0x3A){
+          checksum = checksum + 0x3A;
+          stateRead = ESPERANDOPL;
+        }
       break;
       case ESPERANDOPL:
       if (lenghtPL > 1){
@@ -251,5 +258,11 @@ void loop() {
   }
   if (tiempo - uTDato > 15){
     stateRead =  ESPERANDOE0;
+  }
+  if(indexWrite != indexRead){
+    if(Serial.availableForWrite()){
+      Serial.write(txBuff[indexRead++]);
+      indexRead &= (32 - 1);
+    }
   }
 }

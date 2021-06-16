@@ -27,7 +27,7 @@
 void Respuesta();
 void LeerBotones();
 
-uint8_t txbuff, checksum, i, header1 = 0xE0, header2 = 0x0E, estado, rxBuff[16], txBuff[9], indexWrite, indexRead;
+uint8_t txbuff, checksum, i, header1 = 0xE0, header2 = 0x0E, estado, rxBuff[32], txBuff[32], indexWrite, indexRead;
 uint8_t stateRead, respuesta, botones, botonesAnterior;
 uint16_t lenghtPL;
 unsigned long tiempo, uTDebounce, uTRebote, uTBtn, uTDato;
@@ -72,8 +72,6 @@ void LeerBotones(){
           txBuff[2] = 0x02;
           txBuff[5] = 0xD1;
           txBuff[6] = 0xFB;
-          txBuff[7] = 0x00;
-          txBuff[8] = 0x00;
         }
         indexWrite = 0x00;
         while ((indexWrite < 9) && Serial.availableForWrite()){
@@ -82,18 +80,18 @@ void LeerBotones(){
         }
         } else {
           uTDebounce = millis();
-          if (((botonesAnterior & 0x02) || (botonesAnterior && 0x04)) && ((uTDebounce - uTBtn) > 500)){
-            txBuff[2] = 0x04;
-            txBuff[5] = 0xD0;
-            if (botonesAnterior & 0x02){
-              txBuff[6] = 0x0A;
-              txBuff[7] = 0x00;
-              txBuff[8] = 0x06;
-            }
-            if (botonesAnterior & 0x04){
-              txBuff[6] = 0xF6;
-              txBuff[7] = 0xFF;
-              txBuff[8] = 0xF1;
+          if (((botonesAnterior & 0x02) || (botonesAnterior & 0x04)) && ((uTDebounce - uTBtn) > 500)){
+            if ((uTDebounce - uTBtn) > 2000){
+              if (botonesAnterior & 0x02){
+                txBuff[6] = 0x0A;
+                txBuff[7] = 0x00;
+                txBuff[8] = 0x06;
+              }
+              if (botonesAnterior & 0x04){
+                txBuff[6] = 0xF6;
+                txBuff[7] = 0xFF;
+                txBuff[8] = 0xF1;
+              }
             }
             indexWrite = 0;
             while((indexWrite < 9) && Serial.availableForWrite()){
@@ -152,7 +150,7 @@ void Respuesta(){
     default:
     respuesta = 0x00;
   }
-  if (respuesta == 0x00){
+  if (!respuesta){
     digitalWrite(LED1,estado & 0x01);
     digitalWrite(LED2,estado & 0x02);
     digitalWrite(LED3,estado & 0x04);
@@ -165,7 +163,6 @@ void Respuesta(){
     }
   }
 }
-
 
 void setup() {
 
@@ -196,50 +193,52 @@ void loop() {
     uTDato = millis();
     switch(stateRead){
       case ESPERANDOE0:
-      if( rxBuff[indexRead] == 0xE0 ){
-        stateRead = ESPERANDO0E;
-      }
+        if( rxBuff[indexRead] == 0xE0 ){
+          stateRead = ESPERANDO0E;
+        }
       break;
       case ESPERANDO0E:
-      if( rxBuff[indexRead] == 0x0E ){
-        stateRead = ESPERANDOLB;
-      } else {
-        stateRead = ESPERANDOE0;
-      }
+        if( rxBuff[indexRead] == 0x0E ){
+          stateRead = ESPERANDOLB;
+        } else {
+          stateRead = ESPERANDOE0;
+        }
       break;
       case ESPERANDOLB:
-      lenghtPL = rxBuff[indexRead];
-      checksum = 0xE0 + 0x0E + rxBuff[indexRead];
-      stateRead = ESPERANDOHB;
+        lenghtPL = rxBuff[indexRead];
+        checksum = 0xE0 + 0x0E + rxBuff[indexRead];
+        stateRead = ESPERANDOHB;
       break;
       case ESPERANDOHB:
-      stateRead = ESPERANDO3A;
-      lenghtPL = lenghtPL + 256 * rxBuff[indexRead];
-      checksum = checksum + rxBuff[indexRead];
+        stateRead = ESPERANDO3A;
+        lenghtPL = lenghtPL + 256 * rxBuff[indexRead];
+        checksum = checksum + rxBuff[indexRead];
       break;
       case ESPERANDO3A:
-      if (rxBuff[indexRead] == 0x3A){
-        checksum = checksum + 0x3A;
-        stateRead = ESPERANDOPL;
-      }
+        if (rxBuff[indexRead] == 0x3A){
+          checksum = checksum + 0x3A;
+          stateRead = ESPERANDOPL;
+        } else {
+          stateRead = ESPERANDOE0;
+        }
       break;
       case ESPERANDOPL:
-      if (lenghtPL > 1){
-        checksum = checksum + rxBuff[indexRead];
-      }
-      lenghtPL--;
-      if (lenghtPL == 0){
-        stateRead = ESPERANDOE0;
-        if (checksum == rxBuff[indexRead]){
-          Respuesta();
-          }
+        if (lenghtPL > 1){
+          checksum = checksum + rxBuff[indexRead];
+        }
+        lenghtPL--;
+        if (lenghtPL == 0){
+          stateRead = ESPERANDOE0;
+          if (checksum == rxBuff[indexRead]){
+            Respuesta();
+            }
           indexRead = 0;
-        } else {
-          indexRead++;
+          } else {
+            indexRead++;
         }
       break;
       default:
-      stateRead = ESPERANDOE0;
+        stateRead = ESPERANDOE0;
     }
   }
   tiempo = millis();

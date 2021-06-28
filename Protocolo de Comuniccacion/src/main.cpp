@@ -41,10 +41,9 @@ void PlaySec();
 uint8_t rxBuff[32], txBuff[32], indexWriteTX, indexReadTX, indexReadRX, indexWriteRX;
 uint8_t stateRead, botones, botonesAnterior, checksumRX, checksumTX, estado;
 uint16_t lenghtPL, lenghtPLSaved;
-unsigned long tiempo, uTDebounce, uTRebote, uTBtn, uTDato, uTPlay;
-uint32_t secMemory, readSec;
-unsigned long timeMemory[10];
-uint8_t indexMemoryWrite, indexMemoryRead, play, stop;
+unsigned long tiempo, uTDebounce, uTRebote, uTBtn, uTDato, uTPlay, uTLED;
+uint16_t timeMemory[20];
+uint8_t indexTimeMemoryWrite, indexTimeMemoryRead, indexSecMemoryWrite, indexSecMemoryRead, play, stop, secMemory[20], cantSec;
 
 void LeerBotones(){
   if (digitalRead(SW1) || digitalRead(SW2) || digitalRead(SW3) || digitalRead(SW4)){
@@ -141,53 +140,54 @@ void PutHeaderIntx(){
 void SaveSec(uint8_t mode){
   switch (mode) {
     case RESET:
-      secMemory = 0x00;
-      indexMemoryWrite = 0;
-      readSec = 0x01;
+      for (indexSecMemoryWrite = 0; indexSecMemoryWrite >= 11; indexSecMemoryWrite++){
+        secMemory[indexSecMemoryWrite] = 0x00;
+        timeMemory[indexSecMemoryWrite] = 0x00;
+      }
+      indexTimeMemoryWrite = 0;
+      indexSecMemoryWrite = 0;
       stop = 0x01;
     break;
     case SAVE:
-      if (secMemory == 0){
-        secMemory |= estado;
-        secMemory <<= 4;
-        readSec <<= 4;
-        timeMemory[indexMemoryWrite] = 0;
-        indexMemoryWrite++;
+      if (indexTimeMemoryWrite == 0){
+        secMemory[indexSecMemoryWrite] |= estado;
+        indexSecMemoryWrite++;
+        timeMemory[indexTimeMemoryWrite] = 0;
+        indexTimeMemoryWrite++;
       } else {
-        secMemory |= estado;
-        secMemory <<= 4;
-        readSec <<= 4;
+        secMemory[indexSecMemoryWrite] |= estado;
+        indexSecMemoryWrite++;
         tiempo = millis();
-        timeMemory[indexMemoryWrite] = (tiempo - uTRebote);
-        indexMemoryWrite++;
+        timeMemory[indexTimeMemoryWrite] = (tiempo - uTRebote);
+        indexTimeMemoryWrite++;
       }
     break;
     case STOP:
       stop = 0x00;
-      indexMemoryRead = 0x00;
+      cantSec = indexSecMemoryWrite;
+      indexTimeMemoryRead = 0x00;
+      indexSecMemoryRead = 0x00;
+      play = 0x00;
     break;
   }
 }
 
 void PlaySec(){
   tiempo = millis();
-  if((tiempo - uTPlay) >= timeMemory[indexMemoryRead]){
-    digitalWrite(LED1, secMemory & readSec);
-    readSec >>= 1;
-    digitalWrite(LED2, secMemory & readSec);
-    readSec >>= 1;
-    digitalWrite(LED3, secMemory & readSec);
-    readSec >>= 1;
-    digitalWrite(LED4, secMemory & readSec);
-    readSec >>= 1;
-    indexMemoryRead++;
-    if(readSec <= 1){
-      readSec = 0x01;
-      readSec <<= (indexMemoryRead * 4);
-      indexMemoryRead = 0;
+  if((tiempo - uTPlay) >= timeMemory[indexTimeMemoryRead]){
+    digitalWrite(LED1, secMemory[indexSecMemoryRead] & 0x01);
+    digitalWrite(LED2, secMemory[indexSecMemoryRead] & 0x02);
+    digitalWrite(LED3, secMemory[indexSecMemoryRead] & 0x04);
+    digitalWrite(LED4, secMemory[indexSecMemoryRead] & 0x08);
+    indexTimeMemoryRead++;
+    indexSecMemoryRead++;
+    if(indexTimeMemoryRead == cantSec){
+      indexTimeMemoryRead = 0;
+      indexSecMemoryRead = 0;
       play = 0x00;
     }
     uTPlay = millis();
+    uTLED = uTPlay;
   }
 }
 
@@ -216,24 +216,22 @@ void Respuesta(){
     case DERECHA:
       estado = 0x01;
       SaveSec(SAVE);
-      uTRebote = millis();
     break;
     case IZQUIERDA:
       estado = 0x02;
       SaveSec(SAVE);
-      uTRebote = millis();
     break;
     case ABAJO:
       estado = 0x04;
       SaveSec(SAVE);
-      uTRebote = millis();
     break;
     case ARRIBA:
       estado = 0x08;
       SaveSec(SAVE);
-      uTRebote = millis();
     break;
   }
+  uTRebote = millis();
+  uTLED = uTRebote;
   digitalWrite(LED1,estado & 0x01);
   digitalWrite(LED2,estado & 0x02);
   digitalWrite(LED3,estado & 0x04);
@@ -252,8 +250,6 @@ void setup() {
   pinMode(SW3, INPUT);
   pinMode(SW4, INPUT);
 
-  readSec = 0x01;
-  secMemory = 0x00;
   stateRead = ESPERANDOE0;
   Serial.begin(9600);
 
@@ -321,16 +317,16 @@ void loop() {
     indexReadRX &= (32 - 1);
   }
   tiempo = millis();
-  /*if (tiempo - uTRebote >= 800){
+  if (tiempo - uTLED >= 800){
     digitalWrite(LED1,LOW);
     digitalWrite(LED2,LOW);
     digitalWrite(LED3,LOW);
     digitalWrite(LED4,LOW);
-  }*/
+  }
   if (tiempo - uTDato > 15){
     stateRead =  ESPERANDOE0;
   }
-  if ((tiempo - uTRebote > 6000) && (stop = 0x01)){
+  if ((tiempo - uTRebote > 8000) && (stop = 0x01)){
     SaveSec(STOP);
   }
   if(indexWriteTX != indexReadTX){

@@ -32,15 +32,9 @@ void ChangeVariable();
 void Shot();
 void Add(uint16_t cant);
 
-<<<<<<< HEAD
-uint8_t txbuff, checksum, i, header1 = 0xE0, header2 = 0x0E, estado, rxBuff[32], txBuff[32], indexWrite, indexRead;
-uint8_t stateRead, respuesta, botones, botonesAnterior;
-uint16_t lenghtPL;
-=======
 uint8_t rxBuff[32], txBuff[32], indexWriteTX, indexReadTX, indexReadRX, indexWriteRX;
 uint8_t stateRead, respuesta, botones, botonesAnterior, checksumRX, checksumTX, estado;
 uint16_t lenghtPL, lenghtPLSaved;
->>>>>>> actualizacion
 unsigned long tiempo, uTDebounce, uTRebote, uTBtn, uTDato;
 
 void LeerBotones(){
@@ -68,42 +62,17 @@ void LeerBotones(){
           Add(-1);
         }
         if (botonesAnterior & 0x08 ){
-<<<<<<< HEAD
-          txBuff[2] = 0x02;
-          txBuff[5] = 0xD1;
-          txBuff[6] = 0xFB;
-=======
           Shot();
->>>>>>> actualizacion
         }
         uTBtn = millis();
       } else {
           uTDebounce = millis();
           if (((botonesAnterior & 0x02) || (botonesAnterior & 0x04)) && ((uTDebounce - uTBtn) > 500)){
-<<<<<<< HEAD
-            if ((uTDebounce - uTBtn) > 2000){
-              if (botonesAnterior & 0x02){
-                txBuff[6] = 0x0A;
-                txBuff[7] = 0x00;
-                txBuff[8] = 0x06;
-              }
-              if (botonesAnterior & 0x04){
-                txBuff[6] = 0xF6;
-                txBuff[7] = 0xFF;
-                txBuff[8] = 0xF1;
-              }
-            }
-            indexWrite = 0;
-            while((indexWrite < 9) && Serial.availableForWrite()){
-              Serial.write(txBuff[indexWrite]);
-              indexWrite++;
-=======
             if (botonesAnterior & 0x02){
               Add(10);
             }
             if (botonesAnterior & 0x04){
               Add(-10);
->>>>>>> actualizacion
             }
           }
         }
@@ -237,44 +206,18 @@ void loop() {
     uTDato = millis();
     switch(stateRead){
       case ESPERANDOE0:
-<<<<<<< HEAD
-        if( rxBuff[indexRead] == 0xE0 ){
-          stateRead = ESPERANDO0E;
-        }
-      break;
-      case ESPERANDO0E:
-        if( rxBuff[indexRead] == 0x0E ){
-=======
         if( rxBuff[indexReadRX++] == 0xE0 ){
           stateRead = ESPERANDO0E;
         }
       break;
         case ESPERANDO0E:
         if( rxBuff[indexReadRX++] == 0x0E ){
->>>>>>> actualizacion
           stateRead = ESPERANDOLB;
         } else {
           stateRead = ESPERANDOE0;
         }
       break;
       case ESPERANDOLB:
-<<<<<<< HEAD
-        lenghtPL = rxBuff[indexRead];
-        checksum = 0xE0 + 0x0E + rxBuff[indexRead];
-        stateRead = ESPERANDOHB;
-      break;
-      case ESPERANDOHB:
-        stateRead = ESPERANDO3A;
-        lenghtPL = lenghtPL + 256 * rxBuff[indexRead];
-        checksum = checksum + rxBuff[indexRead];
-      break;
-      case ESPERANDO3A:
-        if (rxBuff[indexRead] == 0x3A){
-          checksum = checksum + 0x3A;
-          stateRead = ESPERANDOPL;
-        } else {
-          stateRead = ESPERANDOE0;
-=======
         lenghtPL = rxBuff[indexReadRX];
         lenghtPLSaved = (rxBuff[indexReadRX] - 1);
         checksumRX = 0xE0 + 0x0E + rxBuff[indexReadRX];
@@ -291,32 +234,18 @@ void loop() {
         if (rxBuff[indexReadRX++] == 0x3A){
           checksumRX = checksumRX + 0x3A;
           stateRead = ESPERANDOPL;
->>>>>>> actualizacion
         }
       break;
       case ESPERANDOPL:
         if (lenghtPL > 1){
-<<<<<<< HEAD
-          checksum = checksum + rxBuff[indexRead];
-=======
           checksumRX = checksumRX + rxBuff[indexReadRX];
->>>>>>> actualizacion
         }
         lenghtPL--;
         if (lenghtPL == 0){
           stateRead = ESPERANDOE0;
-<<<<<<< HEAD
-          if (checksum == rxBuff[indexRead]){
-            Respuesta();
-            }
-          indexRead = 0;
-          } else {
-            indexRead++;
-=======
           if (checksumRX == rxBuff[indexReadRX]){
             Respuesta();
           }
->>>>>>> actualizacion
         }
         indexReadRX++;
       break;

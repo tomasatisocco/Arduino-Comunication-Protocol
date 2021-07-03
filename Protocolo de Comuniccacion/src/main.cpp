@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <avr/eeprom.h>
 
 typedef union{
   struct{
@@ -44,6 +45,7 @@ typedef union{
 
 #define   STOPAVAILABLE  flag1.bit.b0
 #define   PLAYAVAILABLE  flag1.bit.b1
+#define   WRITINGEEPROM  flag1.bit.b2
 
 void Return();
 void ReadBtn();
@@ -59,9 +61,18 @@ uint8_t rxBuff[32], txBuff[32], indexWriteTX, indexReadTX, indexReadRX, indexWri
 uint8_t stateRead, buttons, lastButtons, checksumRX, checksumTX, state;
 uint16_t lenghtPL, lenghtPLSaved, timeMemory[20];
 unsigned long time, lastTimeDebounce, lastTimeRebound, lastTimeBtn, lastTimeData, lastTimePlay, lastTimeLED;
-uint8_t indexTimeMemoryWrite, indexTimeMemoryRead, indexSecMemoryWrite, indexSecMemoryRead, secMemory[20], cantSec;
+uint8_t indexTimeMemoryWrite, indexTimeMemoryRead, indexSecMemoryWrite, indexSecMemoryRead, secMemory[20], cantSec, indexEeprom;
 
 _flag flag1;
+
+__attribute__((section(".eeprom"))) uint8_t eeSecMemory[20];
+__attribute__((section(".eeprom"))) uint16_t eeTimeMemory[20];
+__attribute__((section(".eeprom"))) uint8_t eeCantSec;
+
+/*Esta funcion lee los botones y reacciona dependiendo de si se los aprieta una vez
+o si se los mantiene apretados, para salvar el debounce se tiene que leer el mismo
+boton por mas de 30 milisegundos
+Si se aprieta el boton 1 por mas de 3 segundos se guarda en la eeprom la secuencia de rebotes anterior*/
 
 void ReadBtn(){
   if (digitalRead(SW1) || digitalRead(SW2) || digitalRead(SW3) || digitalRead(SW4)){
@@ -78,6 +89,10 @@ void ReadBtn(){
     if( (time - lastTimeDebounce) >= 30){
       if (buttons ^ lastButtons){
         lastButtons = buttons;
+        if (WRITINGEEPROM){
+          WRITINGEEPROM = 0x00;
+          indexEeprom = 0x00;
+        }
         if (lastButtons & 0x01 ){
           ChangeVariable();
         }
@@ -101,7 +116,32 @@ void ReadBtn(){
               Add(-10);
             }
             if (lastButtons & 0x01){
-              PLAYAVAILABLE = 0x01;
+              if ((lastTimeDebounce - lastTimeBtn) > 3000){
+                if (indexEeprom == 0){
+                  WRITINGEEPROM = 0x01;
+                  PLAYAVAILABLE = 0x00;
+                  indexTimeMemoryRead = 0;
+                  indexSecMemoryRead = 0;
+                }
+                if (eeprom_is_ready()){
+                  eeprom_write_byte(&eeSecMemory[indexEeprom], secMemory[indexEeprom]);
+                  eeprom_write_word(&eeTimeMemory[indexEeprom], timeMemory[indexEeprom]);
+                  indexEeprom++;
+                  if (indexEeprom == cantSec){
+                    eeprom_write_byte(&eeCantSec, cantSec);
+                    digitalWrite(LED1, HIGH);
+                    digitalWrite(LED2, HIGH);
+                    digitalWrite(LED3, HIGH);
+                    digitalWrite(LED4, HIGH);
+                    lastTimeLED = millis();
+                    lastTimeBtn = millis();
+                    indexEeprom = 0x00;
+                    WRITINGEEPROM = 0x00;
+                  }
+                }
+              } else {
+                PLAYAVAILABLE = 0x01;
+              }
             }
           }
         }
@@ -111,6 +151,9 @@ void ReadBtn(){
       lastButtons = 0x00;
    }
 }
+
+/* Esta funcion es para sumar la cantidad deseada al movimiento de la pelota
+Toma como input la cantidad que se desea mover y envia el buffer correespondiente*/
 
 void Add(uint16_t cant){
   PutHeaderIntx();
@@ -123,6 +166,8 @@ void Add(uint16_t cant){
   PutByteIntx(checksumTX);
 }
 
+/*Esta funcion simplemente envia el codigo para cambiar de variable manipulada*/
+
 void ChangeVariable(){
   PutHeaderIntx();
   PutByteIntx(0x02);
@@ -131,6 +176,8 @@ void ChangeVariable(){
   PutByteIntx(0xD2);
   PutByteIntx(checksumTX);
 }
+
+/*Esta funcion envia el comando necesario para lanzar la pelota*/
 
 void Shot(){
   PutHeaderIntx();
@@ -141,11 +188,17 @@ void Shot(){
   PutByteIntx(checksumTX);
 }
 
+/*Pone en el buffer de escritura el byte ingresado como input hace la verificacion del buffer
+circular y suma el byte al checksum de envio*/
+
 void PutByteIntx(uint8_t byte){
   txBuff[indexWriteTX++] = byte;
   indexWriteTX &= (32 - 1);
   checksumTX += byte;
 }
+
+/*Pone los bytes EO y OE que es como comienzan todos los mensajes
+hace la verificacion del index para el buffer circular y reinicia el checksum de envio*/
 
 void PutHeaderIntx(){
   txBuff[indexWriteTX++] = 0xE0;
@@ -155,10 +208,20 @@ void PutHeaderIntx(){
   checksumTX = 0x0E + 0xE0;
 }
 
+/*Esta funcion va guardando la secuencia de leds que se prendio y los intervalos de tiempo
+en que se prendieron en le ultimo disparo.
+Consta de tres modos. RESET: cuando se realiza un nuevo lanzamiento vacia los arrays que contienen
+los datos de secuencia y de tiempos de intervalos asi como reinicia los index.
+SAVE: Cuando se recibe un rebote guarda en el array secMemory que led se prendio y pasa al siguiente,
+el tiempo para el primer rebote sera de cero y en el segundo espacio de timeMemory se guarda el tiempo
+qeu paso entre el primer rebote y el segunto y asi sucesivamente
+STOP: cuando la pelota se detiene guarda en cantSec la cantidad de rebotes realizados y reinicia
+los index de lectura y escritura*/
+
 void SaveSec(uint8_t mode){
   switch (mode) {
     case RESET:
-      for (indexSecMemoryWrite = 0; indexSecMemoryWrite >= 11; indexSecMemoryWrite++){
+      for (indexSecMemoryWrite = 0; indexSecMemoryWrite > cantSec; indexSecMemoryWrite++){
         secMemory[indexSecMemoryWrite] = 0x00;
         timeMemory[indexSecMemoryWrite] = 0x00;
       }
@@ -168,10 +231,10 @@ void SaveSec(uint8_t mode){
     break;
     case SAVE:
       if (indexTimeMemoryWrite == 0){
-        secMemory[indexSecMemoryWrite++] |= state;
+        secMemory[indexSecMemoryWrite++] = state;
         timeMemory[indexTimeMemoryWrite++] = 0;
       } else {
-        secMemory[indexSecMemoryWrite++] |= state;
+        secMemory[indexSecMemoryWrite++] = state;
         time = millis();
         timeMemory[indexTimeMemoryWrite++] = (time - lastTimeRebound);
       }
@@ -185,6 +248,8 @@ void SaveSec(uint8_t mode){
     break;
   }
 }
+
+/*Esta funcion reproduce la secuencia guardada en los arrays secMemory y timeMemory*/
 
 void PlaySec(){
   time = millis();
@@ -204,6 +269,9 @@ void PlaySec(){
     lastTimeLED = lastTimePlay;
   }
 }
+
+/*Se analiza la informacion que llego en el payload y se responde en cuansecuencia
+utilizando las funciones vistas anteriormente*/
 
 void Return(){
   switch (rxBuff[(indexReadRX - lenghtPLSaved)]){
@@ -267,6 +335,16 @@ void setup() {
   stateRead = WAITINGE0;
   Serial.begin(9600);
 
+/*Aca se lee lo que hay guardado en la memoria eeprom y se guarda en los
+arrays correspondientes para poder reproducirlo con PlaySec()*/
+
+  cantSec = eeprom_read_byte(&eeCantSec);
+
+  for (indexEeprom = 0; indexEeprom <= cantSec; indexEeprom++){
+    secMemory[indexEeprom] = eeprom_read_byte(&eeSecMemory[indexEeprom]);
+    timeMemory[indexEeprom] = eeprom_read_word(&eeTimeMemory[indexEeprom]);
+  }
+  indexEeprom = 0x00;
 }
 
 void loop() {
